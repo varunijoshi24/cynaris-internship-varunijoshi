@@ -1,0 +1,478 @@
+
+#Day1
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.preprocessing import (
+    LabelEncoder, OneHotEncoder, OrdinalEncoder,
+    StandardScaler, MinMaxScaler, RobustScaler
+)
+from sklearn.feature_selection import SelectKBest, f_classif
+
+np.random.seed(42)
+os.makedirs("outputs", exist_ok=True)
+
+# 1. Create sample dataset
+df = pd.DataFrame({
+    "age": np.random.randint(18, 60, 200),
+    "income": np.random.randint(15000, 100000, 200),
+    "score": np.random.randint(40, 100, 200),
+    "city": np.random.choice(["Bengaluru", "Mysuru", "Chennai"], 200),
+    "education": np.random.choice(["School", "Bachelor", "Master"], 200),
+    "department": np.random.choice(["IT", "HR", "Finance"], 200)
+})
+
+df["target"] = ((df["score"] >= 70) & (df["age"] >= 30)).astype(int)
+
+# 2. Label Encoding
+df["city_label"] = LabelEncoder().fit_transform(df["city"])
+
+# 3. One-Hot Encoding
+onehot = OneHotEncoder(sparse_output=False, handle_unknown="ignore")
+encoded = onehot.fit_transform(df[["department"]])
+encoded_df = pd.DataFrame(
+    encoded,
+    columns=onehot.get_feature_names_out(["department"])
+)
+
+# 4. Ordinal Encoding
+ordinal = OrdinalEncoder(categories=[["School", "Bachelor", "Master"]])
+df["education_code"] = ordinal.fit_transform(df[["education"]])
+
+print("Encoding examples:")
+print(df[["city", "city_label", "education", "education_code"]].head())
+print(encoded_df.head())
+
+# 5. Scale numerical features
+features = ["age", "income", "score"]
+X = df[features]
+
+scaled = {
+    "Original": X,
+    "StandardScaler": pd.DataFrame(StandardScaler().fit_transform(X), columns=features),
+    "MinMaxScaler": pd.DataFrame(MinMaxScaler().fit_transform(X), columns=features),
+    "RobustScaler": pd.DataFrame(RobustScaler().fit_transform(X), columns=features)
+}
+
+for name, data in scaled.items():
+    print(f"\n{name}:\n", data.head().round(2))
+
+# 6. Plot distributions before and after scaling
+fig, axes = plt.subplots(3, 4, figsize=(14, 9))
+
+for i, feature in enumerate(features):
+    for j, (name, data) in enumerate(scaled.items()):
+        axes[i, j].hist(data[feature], bins=15, edgecolor="black")
+        axes[i, j].set_title(f"{feature} - {name}")
+
+plt.tight_layout()
+plt.savefig("outputs/scaling_distributions.png", dpi=300)
+plt.show()
+
+# 7. Select top 5 features
+X_all = pd.concat(
+    [scaled["StandardScaler"], encoded_df.reset_index(drop=True)],
+    axis=1
+)
+selector = SelectKBest(score_func=f_classif, k=5)
+selector.fit(X_all, df["target"])
+
+results = pd.DataFrame({
+    "Feature": X_all.columns,
+    "F_Score": selector.scores_,
+    "Selected": selector.get_support()
+}).sort_values("F_Score", ascending=False)
+
+print("\nTop 5 Features:")
+print(results.head(5))
+
+results.to_csv("outputs/feature_selection.csv", index=False)
+df.to_csv("outputs/encoding_results.csv", index=False)
+
+print("\nTrade-offs:")
+print("LabelEncoder: Compact codes, but may imply a false order.")
+print("OneHotEncoder: No false order, but creates extra columns.")
+print("OrdinalEncoder: Best for categories with a meaningful order.")
+print("StandardScaler: Uses mean and standard deviation.")
+print("MinMaxScaler: Scales values to the 0-1 range.")
+print("RobustScaler: Uses median and quartiles; handles outliers better.")
+print("\nWeek 2 practical completed!")
+
+
+#Day2
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, Normalizer
+from sklearn.feature_selection import SelectKBest, f_classif, chi2, RFE
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+
+os.makedirs("outputs", exist_ok=True)
+np.random.seed(42)
+
+# 1. Create sample dataset
+df = pd.DataFrame({
+    "age": np.random.randint(18, 65, 200),
+    "income": np.random.randint(15000, 100000, 200),
+    "score": np.random.randint(40, 100, 200),
+    "experience": np.random.randint(0, 20, 200)
+})
+df["target"] = ((df["score"] > 70) & (df["age"] > 30)).astype(int)
+
+X = df.drop(columns="target")
+y = df["target"]
+
+# Split before fitting feature transformations
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# 2. Apply four scaling methods
+scalers = {
+    "StandardScaler": StandardScaler(),
+    "MinMaxScaler": MinMaxScaler(),
+    "RobustScaler": RobustScaler(),
+    "Normalizer": Normalizer()
+}
+
+fig, axes = plt.subplots(4, 5, figsize=(16, 12))
+
+for i, feature in enumerate(X.columns):
+    axes[i, 0].hist(X_train[feature], bins=15, edgecolor="black")
+    axes[i, 0].set_title(f"{feature} - Before")
+
+    for j, (name, scaler) in enumerate(scalers.items(), start=1):
+        scaled = scaler.fit_transform(X_train[[feature]])
+        axes[i, j].hist(scaled.ravel(), bins=15, edgecolor="black")
+        axes[i, j].set_title(name)
+
+plt.tight_layout()
+plt.savefig("outputs/scaling_distributions.png", dpi=300)
+plt.show()
+
+# Save transformed training data for each scaler
+for name, scaler in scalers.items():
+    transformed = scaler.fit_transform(X_train)
+    pd.DataFrame(transformed, columns=X.columns).to_csv(
+        f"outputs/{name}.csv", index=False
+    )
+
+# 3. SelectKBest using f_classif
+f_selector = SelectKBest(score_func=f_classif, k="all")
+f_selector.fit(X_train, y_train)
+
+f_results = pd.DataFrame({
+    "Feature": X.columns,
+    "F_Score": f_selector.scores_
+})
+
+# 4. SelectKBest using chi2 (requires non-negative features)
+X_train_minmax = MinMaxScaler().fit_transform(X_train)
+
+chi_selector = SelectKBest(score_func=chi2, k="all")
+chi_selector.fit(X_train_minmax, y_train)
+
+chi_results = pd.DataFrame({
+    "Feature": X.columns,
+    "Chi2_Score": chi_selector.scores_
+})
+
+comparison = f_results.merge(chi_results, on="Feature")
+comparison["F_Rank"] = comparison["F_Score"].rank(
+    ascending=False, method="min"
+).astype(int)
+comparison["Chi2_Rank"] = comparison["Chi2_Score"].rank(
+    ascending=False, method="min"
+).astype(int)
+
+print("\nFeature Ranking Comparison:")
+print(comparison.sort_values("F_Rank"))
+comparison.to_csv("outputs/feature_rankings.csv", index=False)
+
+# 5. RFE with Logistic Regression: select top 3 of 4 features
+# (Change n_features_to_select=3 to 5 when your dataset has at least 5 features.)
+model = make_pipeline(
+    StandardScaler(),
+    LogisticRegression(max_iter=1000)
+)
+
+rfe = RFE(
+    estimator=LogisticRegression(max_iter=1000),
+    n_features_to_select=3
+)
+rfe.fit(X_train, y_train)
+
+rfe_results = pd.DataFrame({
+    "Feature": X.columns,
+    "Rank": rfe.ranking_,
+    "Selected": rfe.support_
+}).sort_values("Rank")
+
+print("\nRFE Results:")
+print(rfe_results)
+rfe_results.to_csv("outputs/rfe_results.csv", index=False)
+
+print("\nExplanation:")
+print("StandardScaler: Centers data and scales by standard deviation.")
+print("MinMaxScaler: Scales values to the 0-1 range.")
+print("RobustScaler: Uses median and IQR; less affected by outliers.")
+print("Normalizer: Scales each row to unit norm.")
+print("f_classif: Uses differences between class means and within-class variation.")
+print("chi2: Measures association between non-negative features and classes.")
+print("RFE: Repeatedly removes the least important feature based on model coefficients.")
+
+print("\nPractical completed! Check the outputs folder.")
+
+#Day-3
+# W2D3: Handling Imbalanced Data using SMOTE
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import make_classification
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report
+from imblearn.over_sampling import SMOTE
+
+os.makedirs("outputs", exist_ok=True)
+
+# 1. Create an imbalanced sample dataset
+X, y = make_classification(
+    n_samples=1000,
+    n_features=6,
+    n_informative=4,
+    n_redundant=0,
+    weights=[0.90, 0.10],
+    random_state=42
+)
+
+X = pd.DataFrame(X, columns=[f"feature_{i}" for i in range(1, 7)])
+y = pd.Series(y, name="target")
+
+print("Before SMOTE:")
+print(y.value_counts())
+
+# 2. Split data BEFORE applying SMOTE
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, stratify=y, random_state=42
+)
+
+# 3. Scale using training data only
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+
+# 4. Apply SMOTE only to training data
+smote = SMOTE(random_state=42)
+X_resampled, y_resampled = smote.fit_resample(
+    X_train_scaled, y_train
+)
+
+print("\nAfter SMOTE:")
+print(pd.Series(y_resampled).value_counts())
+
+# 5. Plot class distribution
+before = y_train.value_counts().sort_index()
+after = pd.Series(y_resampled).value_counts().sort_index()
+
+fig, axes = plt.subplots(1, 2, figsize=(9, 4))
+
+before.plot(kind="bar", ax=axes[0], title="Before SMOTE")
+after.plot(kind="bar", ax=axes[1], title="After SMOTE")
+
+for ax in axes:
+    ax.set_xlabel("Class")
+    ax.set_ylabel("Number of samples")
+
+plt.tight_layout()
+plt.savefig("outputs/smote_class_distribution.png", dpi=300)
+plt.show()
+
+# 6. Train a model
+model = LogisticRegression(max_iter=1000)
+model.fit(X_resampled, y_resampled)
+
+# 7. Evaluate on untouched test data
+predictions = model.predict(X_test_scaled)
+
+print("\nClassification Report:")
+print(classification_report(y_test, predictions, zero_division=0))
+
+# 8. Save evidence
+pd.DataFrame(X_resampled, columns=X.columns).assign(
+    target=np.asarray(y_resampled)
+).to_csv("outputs/smote_training_data.csv", index=False)
+
+print("\nSMOTE practical completed!")
+
+#Day-4
+
+# W2D4: Train/Test Split & Cross-Validation
+
+import os
+import numpy as np
+import pandas as pd
+
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import (
+    train_test_split, cross_val_score, StratifiedKFold
+)
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report
+
+os.makedirs("outputs", exist_ok=True)
+
+# 1. Load dataset
+data = load_breast_cancer()
+X = pd.DataFrame(data.data, columns=data.feature_names)
+y = pd.Series(data.target, name="target")
+
+print("Dataset shape:", X.shape)
+print("\nClass distribution:")
+print(y.value_counts())
+
+# 2. Split into training and testing data
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+print("\nTraining samples:", len(X_train))
+print("Testing samples:", len(X_test))
+
+# 3. Build a pipeline to prevent data leakage
+model = make_pipeline(
+    StandardScaler(),
+    LogisticRegression(max_iter=5000)
+)
+
+# 4. Train and test the model
+model.fit(X_train, y_train)
+predictions = model.predict(X_test)
+
+print("\nTest Accuracy:", round(accuracy_score(y_test, predictions), 4))
+print("\nClassification Report:")
+print(classification_report(y_test, predictions))
+
+# 5. Perform 5-fold stratified cross-validation
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+scores = cross_val_score(
+    model, X_train, y_train, cv=cv, scoring="accuracy"
+)
+
+print("\n5-Fold CV Scores:", np.round(scores, 4))
+print("Mean CV Accuracy:", round(scores.mean(), 4))
+print("Standard Deviation:", round(scores.std(), 4))
+
+# 6. Save results
+results = pd.DataFrame({
+    "Fold": range(1, 6),
+    "Accuracy": scores
+})
+results.to_csv("outputs/cross_validation_results.csv", index=False)
+
+print("\nPractical completed!")
+
+
+#Day-5
+# W2D5: Titanic End-to-End Preprocessing Pipeline
+
+import os
+import numpy as np
+import pandas as pd
+
+from sklearn.model_selection import train_test_split
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+
+os.makedirs("outputs", exist_ok=True)
+
+# 1. Load Titanic dataset
+url = "https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv"
+df = pd.read_csv(url)
+
+print("Dataset Shape:", df.shape)
+print("\nFirst 5 rows:")
+print(df.head())
+
+# 2. EDA: inspect missing values
+print("\nMissing Values (%):")
+print((df.isnull().mean() * 100).round(2))
+
+print("\nSurvival Distribution:")
+print(df["Survived"].value_counts())
+
+# 3. Select useful features and target
+features = ["Pclass", "Sex", "Age", "SibSp", "Parch", "Fare", "Embarked"]
+X = df[features]
+y = df["Survived"]
+
+# 4. Split BEFORE fitting preprocessing
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+numeric_features = ["Pclass", "Age", "SibSp", "Parch", "Fare"]
+categorical_features = ["Sex", "Embarked"]
+
+# 5. Handle missing values, encode, and scale
+numeric_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="median")),
+    ("scaler", StandardScaler())
+])
+
+categorical_pipeline = Pipeline([
+    ("imputer", SimpleImputer(strategy="most_frequent")),
+    ("encoder", OneHotEncoder(handle_unknown="ignore"))
+])
+
+preprocessor = ColumnTransformer([
+    ("numeric", numeric_pipeline, numeric_features),
+    ("categorical", categorical_pipeline, categorical_features)
+])
+
+# 6. Fit only on training data
+X_train_ready = preprocessor.fit_transform(X_train)
+X_test_ready = preprocessor.transform(X_test)
+
+# 7. Get output feature names
+feature_names = preprocessor.get_feature_names_out()
+
+# 8. Export ML-ready data
+train_df = pd.DataFrame(
+    X_train_ready.toarray() if hasattr(X_train_ready, "toarray") else X_train_ready,
+    columns=feature_names
+)
+test_df = pd.DataFrame(
+    X_test_ready.toarray() if hasattr(X_test_ready, "toarray") else X_test_ready,
+    columns=feature_names
+)
+
+train_df["Survived"] = y_train.reset_index(drop=True)
+test_df["Survived"] = y_test.reset_index(drop=True)
+
+train_df.to_csv("outputs/titanic_train_ready.csv", index=False)
+test_df.to_csv("outputs/titanic_test_ready.csv", index=False)
+
+print("\nProcessed training shape:", train_df.shape)
+print("Processed testing shape:", test_df.shape)
+print("\nSaved files in outputs folder.")
+print("Titanic preprocessing completed!")
+
+
+
+
