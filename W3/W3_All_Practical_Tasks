@@ -1,0 +1,554 @@
+# W3D1: Linear Regression - Scikit-Learn
+# Tasks: Linear Regression, Ridge, Lasso, Evaluation, Plots
+# Stack: NumPy, Pandas, Scikit-Learn, Matplotlib
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import fetch_california_housing
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LinearRegression, Ridge, Lasso
+from sklearn.metrics import (
+    mean_squared_error,
+    mean_absolute_error,
+    r2_score
+)
+
+# 1. LOAD A REAL DATASET
+print("=" * 60)
+print("W3D1: LINEAR REGRESSION - SCIKIT-LEARN")
+print("=" * 60)
+
+housing = fetch_california_housing(as_frame=True)
+
+X = housing.data
+y = housing.target
+
+print("\nDataset shape:", X.shape)
+print("\nFirst five rows:")
+print(X.head())
+
+# 2. SPLIT THE DATA
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+print("\nTraining samples:", len(X_train))
+print("Testing samples:", len(X_test))
+
+# 3. CREATE THREE MODELS
+models = {
+    "Linear Regression": LinearRegression(),
+    "Ridge": Ridge(alpha=1.0),
+    "Lasso": Lasso(alpha=0.01, max_iter=10000)
+}
+
+results = []
+predictions = {}
+
+# 4. TRAIN AND EVALUATE EACH MODEL
+for name, model in models.items():
+
+    # Scaling is fitted on training data only.
+    pipeline = Pipeline([
+        ("scaler", StandardScaler()),
+        ("model", model)
+    ])
+
+    pipeline.fit(X_train, y_train)
+    y_pred = pipeline.predict(X_test)
+
+    predictions[name] = y_pred
+
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = np.sqrt(mse)
+    mae = mean_absolute_error(y_test, y_pred)
+    r2 = r2_score(y_test, y_pred)
+
+    results.append({
+        "Model": name,
+        "MSE": mse,
+        "RMSE": rmse,
+        "MAE": mae,
+        "R2 Score": r2
+    })
+
+    print(f"\n{'-' * 45}")
+    print(name)
+    print("-" * 45)
+    print("MSE :", round(mse, 4))
+    print("RMSE:", round(rmse, 4))
+    print("MAE :", round(mae, 4))
+    print("R2  :", round(r2, 4))
+
+    # Print coefficients
+    trained_model = pipeline.named_steps["model"]
+    coefficients = pd.Series(
+        trained_model.coef_,
+        index=X.columns
+    )
+
+    print("\nCoefficients:")
+    print(coefficients.round(4))
+
+# 5. COMPARE ALL THREE MODELS
+results_df = pd.DataFrame(results)
+
+print("\n" + "=" * 60)
+print("MODEL COMPARISON TABLE")
+print("=" * 60)
+print(results_df.round(4).to_string(index=False))
+
+results_df.to_csv("W3D1_model_comparison.csv", index=False)
+print("\nComparison saved to W3D1_model_comparison.csv")
+
+# 6. PLOT: ACTUAL VS PREDICTED
+linear_predictions = predictions["Linear Regression"]
+
+plt.figure(figsize=(8, 6))
+plt.scatter(y_test, linear_predictions, alpha=0.4)
+
+min_value = min(y_test.min(), linear_predictions.min())
+max_value = max(y_test.max(), linear_predictions.max())
+
+plt.plot(
+    [min_value, max_value],
+    [min_value, max_value],
+    linestyle="--"
+)
+
+plt.xlabel("Actual House Value")
+plt.ylabel("Predicted House Value")
+plt.title("Linear Regression: Actual vs Predicted")
+plt.tight_layout()
+plt.savefig("W3D1_actual_vs_predicted.png", dpi=150)
+plt.show()
+
+# 7. PLOT: RESIDUALS
+residuals = y_test.to_numpy() - linear_predictions
+
+plt.figure(figsize=(8, 6))
+plt.scatter(linear_predictions, residuals, alpha=0.4)
+plt.axhline(y=0, linestyle="--")
+
+plt.xlabel("Predicted House Value")
+plt.ylabel("Residual (Actual - Predicted)")
+plt.title("Linear Regression: Residual Plot")
+plt.tight_layout()
+plt.savefig("W3D1_residuals.png", dpi=150)
+plt.show()
+
+print("\nAll W3D1 practical tasks completed!")
+print("Check the generated CSV and PNG files for evidence.")
+
+
+#Day-2
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score,
+    confusion_matrix,
+    classification_report,
+    roc_auc_score
+)
+
+# 1. Load dataset
+data = load_breast_cancer(as_frame=True)
+
+X = data.data
+y = data.target
+
+print("Dataset shape:", X.shape)
+print("\nFirst five rows:")
+print(X.head())
+
+# 2. Split into training and testing data
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+# 3. Create and train the model
+model = Pipeline([
+    ("scaler", StandardScaler()),
+    ("classifier", LogisticRegression(max_iter=5000))
+])
+
+model.fit(X_train, y_train)
+
+# 4. Make predictions
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]
+
+# 5. Evaluate the model
+print("\nAccuracy:", accuracy_score(y_test, y_pred))
+print("\nConfusion Matrix:")
+print(confusion_matrix(y_test, y_pred))
+
+print("\nClassification Report:")
+print(classification_report(y_test, y_pred, target_names=data.target_names))
+
+print("ROC-AUC:", roc_auc_score(y_test, y_prob))
+
+# 6. Save predictions as a CSV file
+results = pd.DataFrame({
+    "Actual": y_test,
+    "Predicted": y_pred,
+    "Probability_of_class_1": y_prob
+})
+
+results.to_csv("W3D2_predictions.csv", index=False)
+print("\nPredictions saved to W3D2_predictions.csv")
+
+# 7. Plot actual vs predicted classes
+plt.figure(figsize=(8, 5))
+plt.scatter(range(len(y_test)), y_test, label="Actual", alpha=0.7)
+plt.scatter(range(len(y_pred)), y_pred, label="Predicted", alpha=0.7)
+plt.xlabel("Test Sample")
+plt.ylabel("Class (0 or 1)")
+plt.title("Actual vs Predicted Classes")
+plt.legend()
+plt.tight_layout()
+plt.savefig("W3D2_actual_vs_predicted.png")
+plt.show()
+
+# 8. Plot predicted probabilities
+plt.figure(figsize=(8, 5))
+plt.hist(y_prob, bins=20, edgecolor="black")
+plt.xlabel("Predicted Probability of Class 1")
+plt.ylabel("Number of Samples")
+plt.title("Logistic Regression Predicted Probabilities")
+plt.tight_layout()
+plt.savefig("W3D2_predicted_probabilities.png")
+plt.show()
+
+#Day-3
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeClassifier, plot_tree
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+
+# 1. Load the dataset
+data = load_breast_cancer(as_frame=True)
+X = data.data
+y = data.target
+
+print("Dataset shape:", X.shape)
+print("\nClass names:", data.target_names)
+
+# 2. Split into training and testing data
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+# 3. Create the models
+decision_tree = DecisionTreeClassifier(
+    max_depth=4,
+    random_state=42
+)
+
+random_forest = RandomForestClassifier(
+    n_estimators=100,
+    random_state=42
+)
+
+# 4. Train both models
+decision_tree.fit(X_train, y_train)
+random_forest.fit(X_train, y_train)
+
+# 5. Make predictions
+dt_pred = decision_tree.predict(X_test)
+rf_pred = random_forest.predict(X_test)
+
+# 6. Compare model performance
+results = pd.DataFrame({
+    "Model": ["Decision Tree", "Random Forest"],
+    "Accuracy": [
+        accuracy_score(y_test, dt_pred),
+        accuracy_score(y_test, rf_pred)
+    ]
+})
+
+print("\nModel Comparison:")
+print(results.to_string(index=False))
+
+print("\nDecision Tree Classification Report:")
+print(classification_report(
+    y_test, dt_pred, target_names=data.target_names
+))
+
+print("\nRandom Forest Classification Report:")
+print(classification_report(
+    y_test, rf_pred, target_names=data.target_names
+))
+
+# 7. Visualise the Decision Tree
+plt.figure(figsize=(20, 10))
+plot_tree(
+    decision_tree,
+    feature_names=X.columns,
+    class_names=data.target_names,
+    filled=True,
+    rounded=True,
+    fontsize=7
+)
+plt.title("Decision Tree (Maximum Depth = 4)")
+plt.tight_layout()
+plt.savefig("W3D3_decision_tree.png", dpi=150)
+plt.show()
+
+# 8. Plot model accuracy
+plt.figure(figsize=(7, 5))
+plt.bar(results["Model"], results["Accuracy"])
+plt.ylabel("Accuracy")
+plt.ylim(0, 1)
+plt.title("Decision Tree vs Random Forest")
+plt.tight_layout()
+plt.savefig("W3D3_model_comparison.png", dpi=150)
+plt.show()
+
+# 9. Save results
+results.to_csv("W3D3_model_comparison.csv", index=False)
+print("\nResults saved to W3D3_model_comparison.csv")
+
+#Day-4
+
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    classification_report
+)
+
+# 1. Load the dataset
+data = load_breast_cancer(as_frame=True)
+X = data.data
+y = data.target
+
+print("Dataset shape:", X.shape)
+
+# 2. Split into training and testing data
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+# 3. Create models with feature scaling
+models = {
+    "SVM": Pipeline([
+        ("scaler", StandardScaler()),
+        ("model", SVC())
+    ]),
+    "KNN": Pipeline([
+        ("scaler", StandardScaler()),
+        ("model", KNeighborsClassifier(n_neighbors=5))
+    ])
+}
+
+# 4. Train and evaluate both models
+results = []
+
+for name, model in models.items():
+    model.fit(X_train, y_train)
+    predictions = model.predict(X_test)
+
+    results.append({
+        "Model": name,
+        "Accuracy": accuracy_score(y_test, predictions),
+        "Precision": precision_score(y_test, predictions),
+        "Recall": recall_score(y_test, predictions),
+        "F1 Score": f1_score(y_test, predictions)
+    })
+
+    print(f"\n{name} Classification Report:")
+    print(classification_report(
+        y_test,
+        predictions,
+        target_names=data.target_names
+    ))
+
+# 5. Display comparison table
+results_df = pd.DataFrame(results)
+print("\nModel Comparison:")
+print(results_df.round(4).to_string(index=False))
+
+# 6. Save results
+results_df.to_csv("W3D4_SVM_KNN_results.csv", index=False)
+print("\nResults saved to W3D4_SVM_KNN_results.csv")
+
+# 7. Plot model accuracy
+plt.figure(figsize=(7, 5))
+plt.bar(results_df["Model"], results_df["Accuracy"])
+plt.ylim(0, 1)
+plt.ylabel("Accuracy")
+plt.title("SVM vs KNN Accuracy")
+plt.tight_layout()
+plt.savefig("W3D4_SVM_KNN_accuracy.png", dpi=150)
+plt.show()
+
+#Day-5
+import pandas as pd
+
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import (
+    train_test_split,
+    GridSearchCV,
+    RandomizedSearchCV,
+    StratifiedKFold
+)
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.metrics import accuracy_score, classification_report
+
+# 1. Load the dataset
+data = load_breast_cancer(as_frame=True)
+X = data.data
+y = data.target
+
+print("Dataset shape:", X.shape)
+
+# 2. Split the data
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+# 3. Set up cross-validation
+cv = StratifiedKFold(
+    n_splits=5,
+    shuffle=True,
+    random_state=42
+)
+
+# 4. Create an SVM pipeline
+svm_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", SVC())
+])
+
+# 5. Define SVM parameters for GridSearch
+svm_grid = {
+    "model__C": [0.1, 1, 10],
+    "model__kernel": ["linear", "rbf"],
+    "model__gamma": ["scale", "auto"]
+}
+
+grid_search = GridSearchCV(
+    svm_pipeline,
+    svm_grid,
+    cv=cv,
+    scoring="accuracy",
+    n_jobs=-1
+)
+
+grid_search.fit(X_train, y_train)
+
+print("\nSVM GridSearch Best Parameters:")
+print(grid_search.best_params_)
+print("Best CV Accuracy:", grid_search.best_score_)
+
+# 6. Create a KNN pipeline
+knn_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", KNeighborsClassifier())
+])
+
+# 7. Define KNN parameters for RandomizedSearch
+knn_params = {
+    "model__n_neighbors": list(range(3, 16, 2)),
+    "model__weights": ["uniform", "distance"],
+    "model__p": [1, 2]
+}
+
+random_search = RandomizedSearchCV(
+    knn_pipeline,
+    knn_params,
+    n_iter=12,
+    cv=cv,
+    scoring="accuracy",
+    random_state=42,
+    n_jobs=-1
+)
+
+random_search.fit(X_train, y_train)
+
+print("\nKNN RandomizedSearch Best Parameters:")
+print(random_search.best_params_)
+print("Best CV Accuracy:", random_search.best_score_)
+
+# 8. Evaluate the selected models on the test set
+best_models = {
+    "Tuned SVM": grid_search.best_estimator_,
+    "Tuned KNN": random_search.best_estimator_
+}
+
+results = []
+
+for name, model in best_models.items():
+    predictions = model.predict(X_test)
+
+    results.append({
+        "Model": name,
+        "CV Accuracy": (
+            grid_search.best_score_
+            if name == "Tuned SVM"
+            else random_search.best_score_
+        ),
+        "Test Accuracy": accuracy_score(y_test, predictions)
+    })
+
+    print(f"\n{name} Classification Report:")
+    print(classification_report(
+        y_test,
+        predictions,
+        target_names=data.target_names
+    ))
+
+# 9. Display and save comparison
+results_df = pd.DataFrame(results)
+
+print("\nFinal Model Comparison:")
+print(results_df.round(4).to_string(index=False))
+
+results_df.to_csv("W3D5_tuning_results.csv", index=False)
+print("\nResults saved to W3D5_tuning_results.csv")
+
+
