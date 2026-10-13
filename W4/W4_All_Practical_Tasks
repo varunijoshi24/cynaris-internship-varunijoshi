@@ -1,0 +1,1185 @@
+#Day-1
+# W4D1: Model Evaluation Metrics
+# Topics: Precision, Recall, F1, ROC-AUC,
+# K-Fold CV, Stratified CV, Learning Curves
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import (
+    train_test_split,
+    cross_validate,
+    KFold,
+    StratifiedKFold,
+    learning_curve
+)
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+    classification_report,
+    roc_auc_score,
+    roc_curve,
+    ConfusionMatrixDisplay
+)
+from pathlib import Path
+
+# Create an output folder beside this Python file
+OUTPUT_DIR = Path(__file__).resolve().parent / "W4D1_outputs"
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+# --------------------------------------------------
+# 1. Load the dataset
+# --------------------------------------------------
+
+data = load_breast_cancer(as_frame=True)
+X = data.data
+y = data.target
+
+print("Dataset Shape:", X.shape)
+print("\nClass Distribution:")
+print(y.value_counts())
+
+# --------------------------------------------------
+# 2. Split data into training and testing sets
+# --------------------------------------------------
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.20,
+    random_state=42,
+    stratify=y
+)
+
+# Create a pipeline to prevent data leakage during scaling
+model = Pipeline([
+    ("scaler", StandardScaler()),
+    ("classifier", LogisticRegression(max_iter=5000))
+])
+
+# Train the model
+model.fit(X_train, y_train)
+
+# Make predictions
+y_pred = model.predict(X_test)
+y_prob = model.predict_proba(X_test)[:, 1]
+
+# --------------------------------------------------
+# 3. Calculate evaluation metrics
+# --------------------------------------------------
+
+accuracy = accuracy_score(y_test, y_pred)
+precision = precision_score(y_test, y_pred, zero_division=0)
+recall = recall_score(y_test, y_pred, zero_division=0)
+f1 = f1_score(y_test, y_pred, zero_division=0)
+auc = roc_auc_score(y_test, y_prob)
+
+print("\n--- Model Evaluation Metrics ---")
+print("Accuracy :", round(accuracy, 4))
+print("Precision:", round(precision, 4))
+print("Recall   :", round(recall, 4))
+print("F1-Score :", round(f1, 4))
+print("ROC-AUC  :", round(auc, 4))
+
+# Save metrics to CSV
+metrics = pd.DataFrame({
+    "Metric": ["Accuracy", "Precision", "Recall", "F1-Score", "ROC-AUC"],
+    "Score": [accuracy, precision, recall, f1, auc]
+})
+
+metrics.to_csv(OUTPUT_DIR / "evaluation_metrics.csv", index=False)
+print("\n", metrics)
+
+# --------------------------------------------------
+# 4. Display classification report
+# --------------------------------------------------
+
+print("\n--- Classification Report ---")
+print(classification_report(
+    y_test,
+    y_pred,
+    target_names=data.target_names,
+    zero_division=0
+))
+
+# --------------------------------------------------
+# 5. Confusion Matrix
+# --------------------------------------------------
+
+cm = confusion_matrix(y_test, y_pred)
+
+print("\nConfusion Matrix:")
+print(cm)
+
+ConfusionMatrixDisplay(
+    confusion_matrix=cm,
+    display_labels=data.target_names
+).plot()
+
+plt.title("Confusion Matrix")
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "confusion_matrix.png")
+plt.show()
+plt.close()
+
+# --------------------------------------------------
+# 6. ROC Curve and AUC
+# --------------------------------------------------
+
+fpr, tpr, thresholds = roc_curve(y_test, y_prob)
+
+plt.figure(figsize=(7, 5))
+plt.plot(fpr, tpr, label=f"Logistic Regression (AUC = {auc:.3f})")
+plt.plot([0, 1], [0, 1], "--", label="Random Classifier")
+plt.xlabel("False Positive Rate")
+plt.ylabel("True Positive Rate (Recall)")
+plt.title("ROC Curve")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "roc_curve.png")
+plt.show()
+plt.close()
+
+# --------------------------------------------------
+# 7. K-Fold Cross-Validation
+# --------------------------------------------------
+
+scoring = {
+    "accuracy": "accuracy",
+    "precision": "precision",
+    "recall": "recall",
+    "f1": "f1",
+    "roc_auc": "roc_auc"
+}
+
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
+
+kfold_results = cross_validate(
+    model, X, y, cv=kf, scoring=scoring
+)
+
+print("\n--- K-Fold Cross-Validation ---")
+for metric in scoring:
+    scores = kfold_results[f"test_{metric}"]
+    print(
+        metric,
+        "Mean:", round(scores.mean(), 4),
+        "Std:", round(scores.std(), 4)
+    )
+
+# --------------------------------------------------
+# 8. Stratified K-Fold Cross-Validation
+# --------------------------------------------------
+
+skf = StratifiedKFold(
+    n_splits=5,
+    shuffle=True,
+    random_state=42
+)
+
+stratified_results = cross_validate(
+    model, X, y, cv=skf, scoring=scoring
+)
+
+print("\n--- Stratified K-Fold Cross-Validation ---")
+for metric in scoring:
+    scores = stratified_results[f"test_{metric}"]
+    print(
+        metric,
+        "Mean:", round(scores.mean(), 4),
+        "Std:", round(scores.std(), 4)
+    )
+
+# Save cross-validation results
+cv_table = pd.DataFrame({
+    "Metric": list(scoring.keys()),
+    "KFold_Mean": [
+        kfold_results[f"test_{m}"].mean() for m in scoring
+    ],
+    "StratifiedKFold_Mean": [
+        stratified_results[f"test_{m}"].mean() for m in scoring
+    ]
+})
+
+cv_table.to_csv(OUTPUT_DIR / "cross_validation_results.csv", index=False)
+print("\n", cv_table.round(4))
+
+# --------------------------------------------------
+# 9. Learning Curve
+# --------------------------------------------------
+
+train_sizes, train_scores, validation_scores = learning_curve(
+    model,
+    X,
+    y,
+    train_sizes=np.linspace(0.1, 1.0, 5),
+    cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
+    scoring="accuracy"
+)
+
+train_mean = train_scores.mean(axis=1)
+validation_mean = validation_scores.mean(axis=1)
+
+plt.figure(figsize=(7, 5))
+plt.plot(train_sizes, train_mean, "o-", label="Training Accuracy")
+plt.plot(train_sizes, validation_mean, "o-", label="Validation Accuracy")
+plt.xlabel("Number of Training Examples")
+plt.ylabel("Accuracy")
+plt.title("Learning Curve")
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "learning_curve.png")
+plt.show()
+plt.close()
+
+# --------------------------------------------------
+# 10. Diagnose overfitting or underfitting
+# --------------------------------------------------
+
+print("\n--- Learning Curve Analysis ---")
+print("Final Training Accuracy:", round(train_mean[-1], 4))
+print("Final Validation Accuracy:", round(validation_mean[-1], 4))
+
+gap = train_mean[-1] - validation_mean[-1]
+
+if train_mean[-1] < 0.75 and validation_mean[-1] < 0.75:
+    print("Possible underfitting: both scores are low.")
+elif gap > 0.10:
+    print("Possible overfitting: training score is much higher.")
+else:
+    print("No strong overfitting signal from the final score gap.")
+
+# --------------------------------------------------
+# 11. Save predictions
+# --------------------------------------------------
+
+predictions = pd.DataFrame({
+    "Actual": y_test.to_numpy(),
+    "Predicted": y_pred,
+    "Probability_Class_1": y_prob
+})
+
+predictions.to_csv(OUTPUT_DIR / "predictions.csv", index=False)
+
+print("\nPredictions saved successfully.")
+print("All outputs saved in:", OUTPUT_DIR)
+print("\nW4D1 practical completed!")
+
+#Day-2
+# W4D2: Bias-Variance Tradeoff & Regularisation
+# Stack: NumPy, Pandas, Scikit-learn, Matplotlib
+
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+from sklearn.datasets import load_diabetes
+from sklearn.model_selection import (
+    train_test_split,
+    GridSearchCV,
+    RandomizedSearchCV,
+    KFold,
+    learning_curve
+)
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge, Lasso
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+# Create folder for outputs
+OUTPUT_DIR = Path(__file__).resolve().parent / "W4D2_outputs"
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+RANDOM_STATE = 42
+
+# --------------------------------------------------
+# 1. Load dataset
+# --------------------------------------------------
+
+data = load_diabetes(as_frame=True)
+X = data.data
+y = data.target
+
+print("Dataset shape:", X.shape)
+print("Target summary:")
+print(y.describe())
+
+# --------------------------------------------------
+# 2. Split into training and testing data
+# --------------------------------------------------
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.20,
+    random_state=RANDOM_STATE
+)
+
+cv = KFold(n_splits=5, shuffle=True, random_state=RANDOM_STATE)
+
+# --------------------------------------------------
+# 3. Compare Ridge and Lasso regularisation
+# --------------------------------------------------
+
+ridge_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", Ridge())
+])
+
+lasso_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", Lasso(max_iter=10000))
+])
+
+ridge_pipeline.fit(X_train, y_train)
+lasso_pipeline.fit(X_train, y_train)
+
+models = {
+    "Ridge (L2)": ridge_pipeline,
+    "Lasso (L1)": lasso_pipeline
+}
+
+comparison = []
+
+for name, model in models.items():
+    predictions = model.predict(X_test)
+
+    comparison.append({
+        "Model": name,
+        "MAE": mean_absolute_error(y_test, predictions),
+        "MSE": mean_squared_error(y_test, predictions),
+        "RMSE": np.sqrt(mean_squared_error(y_test, predictions)),
+        "R2": r2_score(y_test, predictions)
+    })
+
+comparison_df = pd.DataFrame(comparison)
+comparison_df.to_csv(
+    OUTPUT_DIR / "regularisation_comparison.csv", index=False
+)
+
+print("\n--- Ridge vs Lasso ---")
+print(comparison_df.round(4).to_string(index=False))
+
+# --------------------------------------------------
+# 4. Grid Search for Ridge
+# --------------------------------------------------
+
+ridge_search_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", Ridge())
+])
+
+ridge_parameters = {
+    "model__alpha": [0.01, 0.1, 1, 10, 100]
+}
+
+grid_search = GridSearchCV(
+    estimator=ridge_search_pipeline,
+    param_grid=ridge_parameters,
+    cv=cv,
+    scoring="neg_mean_squared_error",
+    n_jobs=-1
+)
+
+grid_search.fit(X_train, y_train)
+
+best_ridge = grid_search.best_estimator_
+grid_predictions = best_ridge.predict(X_test)
+
+print("\n--- Grid Search Results ---")
+print("Best parameters:", grid_search.best_params_)
+print("Best CV RMSE:", round(np.sqrt(-grid_search.best_score_), 4))
+print("Test RMSE:", round(
+    np.sqrt(mean_squared_error(y_test, grid_predictions)), 4
+))
+
+grid_results = pd.DataFrame(grid_search.cv_results_)
+grid_results.to_csv(OUTPUT_DIR / "grid_search_results.csv", index=False)
+
+# --------------------------------------------------
+# 5. Randomized Search for Decision Tree
+# --------------------------------------------------
+
+tree_pipeline = Pipeline([
+    ("model", DecisionTreeRegressor(random_state=RANDOM_STATE))
+])
+
+random_parameters = {
+    "model__max_depth": [2, 3, 4, 5, 6, 8, 10, None],
+    "model__min_samples_split": [2, 5, 10, 15, 20],
+    "model__min_samples_leaf": [1, 2, 4, 6, 10]
+}
+
+random_search = RandomizedSearchCV(
+    estimator=tree_pipeline,
+    param_distributions=random_parameters,
+    n_iter=20,
+    cv=cv,
+    scoring="neg_mean_squared_error",
+    random_state=RANDOM_STATE,
+    n_jobs=-1
+)
+
+random_search.fit(X_train, y_train)
+
+best_tree = random_search.best_estimator_
+random_predictions = best_tree.predict(X_test)
+
+print("\n--- Randomized Search Results ---")
+print("Best parameters:", random_search.best_params_)
+print("Best CV RMSE:", round(np.sqrt(-random_search.best_score_), 4))
+print("Test RMSE:", round(
+    np.sqrt(mean_squared_error(y_test, random_predictions)), 4
+))
+
+random_results = pd.DataFrame(random_search.cv_results_)
+random_results.to_csv(
+    OUTPUT_DIR / "randomized_search_results.csv", index=False
+)
+
+# --------------------------------------------------
+# 6. Demonstrate bias and variance using tree depth
+# --------------------------------------------------
+
+depth_results = []
+
+for depth in [1, 2, 3, 5, 8, 12, None]:
+    tree = DecisionTreeRegressor(
+        max_depth=depth,
+        random_state=RANDOM_STATE
+    )
+    tree.fit(X_train, y_train)
+
+    train_pred = tree.predict(X_train)
+    test_pred = tree.predict(X_test)
+
+    depth_results.append({
+        "Max_Depth": str(depth),
+        "Train_RMSE": np.sqrt(mean_squared_error(y_train, train_pred)),
+        "Test_RMSE": np.sqrt(mean_squared_error(y_test, test_pred)),
+        "Train_R2": r2_score(y_train, train_pred),
+        "Test_R2": r2_score(y_test, test_pred)
+    })
+
+depth_df = pd.DataFrame(depth_results)
+depth_df.to_csv(OUTPUT_DIR / "tree_depth_analysis.csv", index=False)
+
+print("\n--- Tree Depth: Bias-Variance Analysis ---")
+print(depth_df.round(4).to_string(index=False))
+
+# Plot training vs test RMSE
+plt.figure(figsize=(8, 5))
+plt.plot(
+    depth_df["Max_Depth"],
+    depth_df["Train_RMSE"],
+    marker="o",
+    label="Training RMSE"
+)
+plt.plot(
+    depth_df["Max_Depth"],
+    depth_df["Test_RMSE"],
+    marker="o",
+    label="Test RMSE"
+)
+plt.xlabel("Maximum Tree Depth")
+plt.ylabel("RMSE (lower is better)")
+plt.title("Tree Depth and Bias-Variance Tradeoff")
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "bias_variance_tree_depth.png", dpi=150)
+plt.show()
+plt.close()
+
+# --------------------------------------------------
+# 7. Learning curve for best Ridge model
+# --------------------------------------------------
+
+learning_pipeline = Pipeline([
+    ("scaler", StandardScaler()),
+    ("model", Ridge(alpha=grid_search.best_params_["model__alpha"]))
+])
+
+train_sizes, train_scores, validation_scores = learning_curve(
+    learning_pipeline,
+    X_train,
+    y_train,
+    train_sizes=np.linspace(0.2, 1.0, 5),
+    cv=cv,
+    scoring="neg_mean_squared_error",
+    n_jobs=-1
+)
+
+# Convert negative MSE to RMSE
+train_rmse = np.sqrt(-train_scores)
+validation_rmse = np.sqrt(-validation_scores)
+
+train_mean = train_rmse.mean(axis=1)
+validation_mean = validation_rmse.mean(axis=1)
+
+learning_df = pd.DataFrame({
+    "Training_Examples": train_sizes,
+    "Mean_Training_RMSE": train_mean,
+    "Mean_Validation_RMSE": validation_mean
+})
+
+learning_df.to_csv(OUTPUT_DIR / "learning_curve_data.csv", index=False)
+
+plt.figure(figsize=(8, 5))
+plt.plot(train_sizes, train_mean, marker="o", label="Training RMSE")
+plt.plot(train_sizes, validation_mean, marker="o", label="Validation RMSE")
+plt.xlabel("Number of Training Examples")
+plt.ylabel("RMSE (lower is better)")
+plt.title("Learning Curve — Ridge Regression")
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "learning_curve.png", dpi=150)
+plt.show()
+plt.close()
+
+# --------------------------------------------------
+# 8. Final summary
+# --------------------------------------------------
+
+summary = pd.DataFrame([
+    {
+        "Model": "GridSearchCV Ridge",
+        "Best_CV_RMSE": np.sqrt(-grid_search.best_score_),
+        "Test_RMSE": np.sqrt(
+            mean_squared_error(y_test, grid_predictions)
+        )
+    },
+    {
+        "Model": "RandomizedSearchCV Decision Tree",
+        "Best_CV_RMSE": np.sqrt(-random_search.best_score_),
+        "Test_RMSE": np.sqrt(
+            mean_squared_error(y_test, random_predictions)
+        )
+    }
+])
+
+summary.to_csv(OUTPUT_DIR / "final_model_summary.csv", index=False)
+
+print("\n--- Final Model Summary ---")
+print(summary.round(4).to_string(index=False))
+print("\nAll results saved in:", OUTPUT_DIR)
+print("W4D2 practical completed!")
+
+#Day-3
+
+# W4D3: Model Serialisation - joblib and pickle
+
+from pathlib import Path
+import pickle
+import joblib
+import numpy as np
+import pandas as pd
+
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report
+
+# Create an output folder
+OUTPUT_DIR = Path("W4D3_outputs")
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+# 1. Load dataset
+data = load_breast_cancer(as_frame=True)
+X = data.data
+y = data.target
+
+print("Dataset shape:", X.shape)
+print("Target classes:", list(data.target_names))
+
+# 2. Split data into training and testing sets
+X_train, X_test, y_train, y_test = train_test_split(
+    X,
+    y,
+    test_size=0.2,
+    random_state=42,
+    stratify=y
+)
+
+# 3. Build and train a machine-learning pipeline
+model = Pipeline([
+    ("scaler", StandardScaler()),
+    ("classifier", LogisticRegression(max_iter=2000))
+])
+
+model.fit(X_train, y_train)
+
+# 4. Evaluate the original model
+predictions = model.predict(X_test)
+original_accuracy = accuracy_score(y_test, predictions)
+
+print("\nOriginal model accuracy:", round(original_accuracy, 4))
+print("\nClassification report:")
+print(classification_report(y_test, predictions, target_names=data.target_names))
+
+# 5. Save model using joblib
+joblib_path = OUTPUT_DIR / "breast_cancer_model.joblib"
+joblib.dump(model, joblib_path)
+print("\nSaved using joblib:", joblib_path)
+
+# 6. Load model using joblib
+loaded_joblib_model = joblib.load(joblib_path)
+joblib_predictions = loaded_joblib_model.predict(X_test)
+
+print("Joblib predictions match:",
+      np.array_equal(predictions, joblib_predictions))
+
+# 7. Save model using pickle
+pickle_path = OUTPUT_DIR / "breast_cancer_model.pkl"
+
+with open(pickle_path, "wb") as file:
+    pickle.dump(model, file)
+
+print("Saved using pickle:", pickle_path)
+
+# 8. Load model using pickle
+with open(pickle_path, "rb") as file:
+    loaded_pickle_model = pickle.load(file)
+
+pickle_predictions = loaded_pickle_model.predict(X_test)
+
+print("Pickle predictions match:",
+      np.array_equal(predictions, pickle_predictions))
+
+# 9. Compare results
+results = pd.DataFrame({
+    "Model": ["Original", "Loaded with joblib", "Loaded with pickle"],
+    "Accuracy": [
+        original_accuracy,
+        accuracy_score(y_test, joblib_predictions),
+        accuracy_score(y_test, pickle_predictions)
+    ],
+    "Predictions_Match": [
+        True,
+        np.array_equal(predictions, joblib_predictions),
+        np.array_equal(predictions, pickle_predictions)
+    ]
+})
+
+results.to_csv(OUTPUT_DIR / "serialisation_results.csv", index=False)
+
+print("\nSerialisation comparison:")
+print(results.to_string(index=False))
+print("\nAll output files saved in:", OUTPUT_DIR.resolve())
+
+#Day-4
+
+# W4D4: FastAPI Model Serving Endpoint
+# Train a model and serve predictions through an API.
+
+from contextlib import asynccontextmanager
+
+import numpy as np
+import pandas as pd
+import uvicorn
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+
+# Store the trained model here
+model = None
+feature_names = None
+target_names = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Train the model when the API starts."""
+    global model, feature_names, target_names
+
+    data = load_breast_cancer(as_frame=True)
+    X = data.data
+    y = data.target
+
+    feature_names = list(X.columns)
+    target_names = list(data.target_names)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X,
+        y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y
+    )
+
+    model = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=2000)
+    )
+    model.fit(X_train, y_train)
+
+    predictions = model.predict(X_test)
+    print("Test accuracy:", round(accuracy_score(y_test, predictions), 4))
+    print("Model loaded. API is ready.")
+
+    yield
+
+
+app = FastAPI(
+    title="W4D4 ML Model API",
+    description="A simple FastAPI endpoint serving a Scikit-learn model.",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+
+class PredictionRequest(BaseModel):
+    # Require all 30 features, with each value supplied as a number.
+    features: dict[str, float] = Field(
+        ...,
+        description="Dictionary containing all model feature names and values."
+    )
+
+
+@app.get("/")
+def home():
+    return {
+        "message": "ML Model API is running",
+        "docs": "/docs",
+        "prediction_endpoint": "/predict"
+    }
+
+
+@app.get("/health")
+def health():
+    return {"status": "healthy", "model_loaded": model is not None}
+
+
+@app.get("/features")
+def get_features():
+    return {"required_features": feature_names}
+
+
+@app.post("/predict")
+def predict(request: PredictionRequest):
+    """Validate input features and return the model prediction."""
+    if model is None:
+        raise HTTPException(status_code=503, detail="Model is not ready")
+
+    received = request.features
+    expected = set(feature_names)
+    supplied = set(received)
+
+    missing = sorted(expected - supplied)
+    extra = sorted(supplied - expected)
+
+    if missing or extra:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "missing_features": missing,
+                "unexpected_features": extra
+            }
+        )
+
+    # Arrange values in exactly the same order used during training.
+    input_frame = pd.DataFrame(
+        [[received[name] for name in feature_names]],
+        columns=feature_names
+    )
+
+    prediction = int(model.predict(input_frame)[0])
+    probabilities = model.predict_proba(input_frame)[0]
+
+    return {
+        "prediction": prediction,
+        "predicted_class": target_names[prediction],
+        "probabilities": {
+            target_names[i]: round(float(probabilities[i]), 4)
+            for i in range(len(target_names))
+        }
+    }
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="127.0.0.1", port=8000)
+
+
+#Day-5
+
+# W4D5: Sentiment Classifier Capstone
+# Compare Logistic Regression and Random Forest.
+# Evaluate models and save results, plots, and trained models.
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import joblib
+
+from sklearn.datasets import load_files
+from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    classification_report,
+    ConfusionMatrixDisplay,
+    RocCurveDisplay,
+    roc_auc_score
+)
+
+# --------------------------------------------------
+# 1. Create output directory
+# --------------------------------------------------
+OUTPUT_DIR = Path("W4D5_outputs")
+OUTPUT_DIR.mkdir(exist_ok=True)
+
+# --------------------------------------------------
+# 2. Create a small example sentiment dataset
+# Replace this with a larger labelled dataset for a
+# more realistic project.
+# Label: 1 = positive, 0 = negative
+# --------------------------------------------------
+positive_reviews = [
+    "I loved this movie",
+    "The story was wonderful",
+    "Excellent acting and great music",
+    "This product works perfectly",
+    "I am very happy with this purchase",
+    "The service was friendly and helpful",
+    "Amazing experience and great quality",
+    "The movie was enjoyable and exciting",
+    "The product is useful and reliable",
+    "I would definitely recommend it",
+    "Fantastic performance and beautiful story",
+    "The food was delicious",
+    "Very satisfied with the service",
+    "This was a pleasant experience",
+    "The quality exceeded my expectations",
+    "I really enjoyed this film",
+    "The staff were kind and professional",
+    "Brilliant product and easy to use",
+    "The experience was excellent",
+    "A great choice and good value"
+]
+
+negative_reviews = [
+    "I hated this movie",
+    "The story was boring",
+    "Poor acting and terrible music",
+    "This product does not work",
+    "I am very unhappy with this purchase",
+    "The service was rude and unhelpful",
+    "Awful experience and poor quality",
+    "The movie was dull and disappointing",
+    "The product is unreliable",
+    "I would not recommend it",
+    "Terrible performance and confusing story",
+    "The food was disgusting",
+    "Very disappointed with the service",
+    "This was an unpleasant experience",
+    "The quality was below expectations",
+    "I did not enjoy this film",
+    "The staff were rude",
+    "Bad product and difficult to use",
+    "The experience was disappointing",
+    "A poor choice and bad value"
+]
+
+texts = positive_reviews + negative_reviews
+labels = np.array([1] * len(positive_reviews) + [0] * len(negative_reviews))
+
+df = pd.DataFrame({
+    "review": texts,
+    "sentiment": labels
+})
+
+df["sentiment_name"] = df["sentiment"].map({
+    0: "Negative",
+    1: "Positive"
+})
+
+df.to_csv(OUTPUT_DIR / "sentiment_dataset.csv", index=False)
+
+print("Dataset shape:", df.shape)
+print("\nClass distribution:")
+print(df["sentiment_name"].value_counts())
+
+# --------------------------------------------------
+# 3. Split data into training and testing sets
+# --------------------------------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    df["review"],
+    df["sentiment"],
+    test_size=0.25,
+    random_state=42,
+    stratify=df["sentiment"]
+)
+
+# --------------------------------------------------
+# 4. Build two text classification pipelines
+# TF-IDF converts text into numerical features.
+# --------------------------------------------------
+models = {
+    "Logistic Regression": Pipeline([
+        ("tfidf", TfidfVectorizer(ngram_range=(1, 2))),
+        ("classifier", LogisticRegression(max_iter=1000))
+    ]),
+    "Random Forest": Pipeline([
+        ("tfidf", TfidfVectorizer(ngram_range=(1, 2))),
+        ("classifier", RandomForestClassifier(
+            n_estimators=100,
+            random_state=42,
+            class_weight="balanced"
+        ))
+    ])
+}
+
+# --------------------------------------------------
+# 5. Train, evaluate, and save models
+# --------------------------------------------------
+results = []
+trained_models = {}
+
+for name, model in models.items():
+    print(f"\nTraining {name}...")
+    model.fit(X_train, y_train)
+
+    predictions = model.predict(X_test)
+    probabilities = model.predict_proba(X_test)[:, 1]
+
+    accuracy = accuracy_score(y_test, predictions)
+    precision = precision_score(
+        y_test, predictions, zero_division=0
+    )
+    recall = recall_score(
+        y_test, predictions, zero_division=0
+    )
+    auc = roc_auc_score(y_test, probabilities)
+
+    results.append({
+        "Model": name,
+        "Accuracy": accuracy,
+        "Precision": precision,
+        "Recall": recall,
+        "ROC_AUC": auc
+    })
+
+    trained_models[name] = model
+
+    print(f"\n{name} classification report:")
+    print(classification_report(
+        y_test,
+        predictions,
+        labels=[0, 1],
+        target_names=["Negative", "Positive"],
+        zero_division=0
+    ))
+
+    # Confusion matrix
+    ConfusionMatrixDisplay.from_predictions(
+        y_test,
+        predictions,
+        display_labels=["Negative", "Positive"],
+        cmap="Blues"
+    )
+    plt.title(f"{name} - Confusion Matrix")
+    plt.tight_layout()
+    safe_name = name.lower().replace(" ", "_")
+    plt.savefig(OUTPUT_DIR / f"{safe_name}_confusion_matrix.png")
+    plt.close()
+
+    # Save the trained pipeline
+    joblib.dump(model, OUTPUT_DIR / f"{safe_name}_model.joblib")
+
+# --------------------------------------------------
+# 6. Plot ROC curves for both models
+# --------------------------------------------------
+fig, ax = plt.subplots()
+
+for name, model in trained_models.items():
+    RocCurveDisplay.from_estimator(
+        model, X_test, y_test, name=name, ax=ax
+    )
+
+ax.plot([0, 1], [0, 1], linestyle="--", label="Random baseline")
+ax.set_title("ROC Curves - Sentiment Classifiers")
+plt.tight_layout()
+plt.savefig(OUTPUT_DIR / "roc_curves.png")
+plt.close()
+
+# --------------------------------------------------
+# 7. Save and display comparison table
+# --------------------------------------------------
+results_df = pd.DataFrame(results)
+results_df.to_csv(OUTPUT_DIR / "model_comparison.csv", index=False)
+
+print("\nModel comparison:")
+print(results_df.round(3).to_string(index=False))
+
+# --------------------------------------------------
+# 8. Load a saved model and predict new reviews
+# --------------------------------------------------
+loaded_model = joblib.load(
+    OUTPUT_DIR / "logistic_regression_model.joblib"
+)
+
+new_reviews = [
+    "The movie was wonderful and enjoyable",
+    "The product was terrible and disappointing"
+]
+
+new_predictions = loaded_model.predict(new_reviews)
+
+print("\nPredictions for new reviews:")
+for review, prediction in zip(new_reviews, new_predictions):
+    sentiment = "Positive" if prediction == 1 else "Negative"
+    print(f"Review: {review}")
+    print(f"Predicted sentiment: {sentiment}\n")
+
+print("All results saved in:", OUTPUT_DIR.resolve())
+
+#Day-6
+
+# W4D6: Responsible AI - AIF360 fairness and Reweighing
+
+import numpy as np
+import pandas as pd
+
+from aif360.datasets import AdultDataset
+from aif360.metrics import BinaryLabelDatasetMetric, ClassificationMetric
+from aif360.algorithms.preprocessing import Reweighing
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import make_pipeline
+from sklearn.metrics import accuracy_score
+
+# Load the Adult Income dataset.
+# Label 1 represents income > $50K in the standard AIF360 dataset.
+dataset = AdultDataset(
+    protected_attribute_names=["sex"],
+    privileged_classes=[["Male"]]
+)
+
+# Create train/test datasets
+train, test = dataset.split([0.8], shuffle=True)
+
+# Identify privileged and unprivileged groups
+privileged_groups = [{"sex": 1.0}]
+unprivileged_groups = [{"sex": 0.0}]
+
+def measure_dataset_fairness(data, title):
+    metric = BinaryLabelDatasetMetric(
+        data,
+        unprivileged_groups=unprivileged_groups,
+        privileged_groups=privileged_groups
+    )
+    print(f"\n{title}")
+    print("Mean outcome, unprivileged group:",
+          round(metric.base_rate(False), 4))
+    print("Mean outcome, privileged group:",
+          round(metric.base_rate(True), 4))
+    print("Disparate impact:",
+          round(metric.disparate_impact(), 4))
+
+measure_dataset_fairness(train, "Before Reweighing")
+
+# Apply Reweighing to the training data only
+reweighing = Reweighing(
+    unprivileged_groups=unprivileged_groups,
+    privileged_groups=privileged_groups
+)
+train_reweighted = reweighing.fit_transform(train)
+
+measure_dataset_fairness(
+    train_reweighted, "After Reweighing - weighted training data"
+)
+
+# Train baseline Logistic Regression
+def fit_and_evaluate(data, title):
+    X_train = data.features
+    y_train = data.labels.ravel()
+    sample_weights = data.instance_weights
+
+    model = make_pipeline(
+        StandardScaler(),
+        LogisticRegression(max_iter=1000)
+    )
+
+    model.fit(
+        X_train,
+        y_train,
+        logisticregression__sample_weight=sample_weights
+    )
+
+    predictions = model.predict(test.features)
+
+    predicted_dataset = test.copy()
+    predicted_dataset.labels = predictions.reshape(-1, 1)
+
+    metric = ClassificationMetric(
+        test,
+        predicted_dataset,
+        unprivileged_groups=unprivileged_groups,
+        privileged_groups=privileged_groups
+    )
+
+    print(f"\n{title}")
+    print("Test accuracy:",
+          round(accuracy_score(test.labels, predictions), 4))
+    print("Disparate impact:",
+          round(metric.disparate_impact(), 4))
+    print("Statistical parity difference:",
+          round(metric.statistical_parity_difference(), 4))
+    print("Equal opportunity difference:",
+          round(metric.equal_opportunity_difference(), 4))
+
+    return model
+
+baseline_model = fit_and_evaluate(train, "Baseline model")
+reweighted_model = fit_and_evaluate(
+    train_reweighted, "Reweighed model"
+)
+
+
+import shap
+import matplotlib.pyplot as plt
+
+# Explain a manageable sample of the test data.
+X_explain = pd.DataFrame(
+    test.features[:100],
+    columns=test.feature_names
+)
+
+# Use the fitted Logistic Regression pipeline.
+explainer = shap.Explainer(
+    baseline_model.predict,
+    X_explain
+)
+
+shap_values = explainer(X_explain)
+
+shap.plots.bar(shap_values, max_display=15, show=False)
+plt.tight_layout()
+plt.savefig("W4D6_shap_summary.png", dpi=150, bbox_inches="tight")
+plt.show()
